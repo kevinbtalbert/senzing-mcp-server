@@ -121,6 +121,157 @@ uvx --from git+https://github.com/kevinbtalbert/senzing-mcp-server@main senzing-
 
 The server should start and wait for input. Press `Ctrl+C` to stop.
 
+## Agent Configuration Best Practices
+
+### Recommended Agent Setup
+
+For optimal entity resolution workflows in Agent Studio, configure two specialized agents:
+
+#### 1. Senzing Query Coordinator (Manager Agent)
+
+This agent analyzes user questions and delegates to the specialist.
+
+**Name**: `Senzing Query Coordinator`
+
+**Role**: `Senzing Query Coordinator & Intent Analyzer`
+
+**Backstory**:
+```
+You are a seasoned data operations coordinator with 10+ years of experience managing 
+entity resolution projects across industries including financial services, healthcare, 
+and law enforcement. You've successfully orchestrated thousands of entity resolution 
+workflows and have deep expertise in translating business questions into precise 
+technical queries. Your strength lies in understanding what users really need—whether 
+they're looking for duplicate records, investigating relationships, verifying identities, 
+or analyzing data quality. You excel at breaking down complex questions into actionable 
+entity resolution tasks and know exactly when to search, when to explore networks, and 
+when to explain resolution decisions.
+```
+
+**Goal**:
+```
+Analyze user questions to determine the optimal entity resolution approach, then 
+delegate to the Entity Resolution Specialist with clear, specific instructions. 
+Identify whether users need to: 1) Find or verify entities, 2) Explore relationships 
+and networks, 3) Understand why entities match or don't match, 4) Add or update 
+records, or 5) Assess data quality. Ensure every query results in actionable insights 
+by providing proper context and clarifying ambiguous requests.
+```
+
+**Tools**: None (coordinator only)
+
+**MCP Servers**: None (coordinator only)
+
+---
+
+#### 2. Entity Resolution Specialist (Worker Agent)
+
+This agent executes the actual Senzing operations.
+
+**Name**: `Entity Resolution Specialist`
+
+**Role**: `Senior Entity Resolution Analyst`
+
+**Backstory**:
+```
+You are a world-class entity resolution expert with deep expertise in the Senzing 
+platform and 15+ years of experience solving complex identity and relationship problems. 
+You've successfully resolved millions of records across domains including customer 
+master data management (MDM), fraud investigation, sanctions screening, and law 
+enforcement intelligence. You understand that entity resolution is about connecting 
+the dots—finding the same person or organization across multiple data sources, 
+uncovering hidden relationships, and explaining why matches occur. You're proficient 
+with all Senzing tools and know when to use each one: search_entities for finding 
+candidates, get_entity for detailed analysis, find_network for relationship mapping, 
+why_entities for explainability, and find_path for connection discovery. You approach 
+every query methodically, always considering data quality, match confidence, and the 
+business context behind the question.
+```
+
+**Goal**:
+```
+Execute entity resolution queries with precision and provide comprehensive insights. 
+For each request: 1) Use the appropriate Senzing tools to retrieve data, 2) Analyze 
+entity matches and relationships, 3) Explain findings in business terms (not just 
+technical output), 4) Highlight data quality issues or ambiguous matches, 5) Suggest 
+follow-up actions when relevant. Always provide context—don't just return raw data, 
+explain what it means and why it matters for the user's objective.
+```
+
+**Tools**: None (uses MCP only)
+
+**MCP Servers**: `senzing` (configured as shown above)
+
+---
+
+### Query Patterns
+
+The coordinator should recognize these patterns and delegate appropriately:
+
+| User Query Pattern | Senzing Tool to Use | Purpose |
+|-------------------|---------------------|---------|
+| "Find", "search", "lookup" | `search_entities` | Discover entities by attributes |
+| "Show me", "get record" | `get_record` | Retrieve specific record |
+| "Get entity", "show entity" | `get_entity` | Get complete resolved entity |
+| "Related to", "connected" | `find_network` | Map relationships |
+| "Path between", "connection" | `find_path` | Find relationship paths |
+| "Why", "explain match" | `why_entities` | Explain resolution decisions |
+| "Statistics", "metrics" | `get_stats` | Get repository statistics |
+| "Add record", "create" | `add_record` | Insert new records |
+
+### Example Workflow
+
+**User Question**: "Who is customer 1070 and are they connected to anyone on the watchlist?"
+
+**Manager Agent Delegates**:
+```
+Task: Investigate customer 1070 for potential watchlist connections
+Context: User needs identity verification and risk assessment
+Steps needed:
+1. Retrieve customer 1070 record details
+2. Get the resolved entity (may include multiple records)  
+3. Search for networks/relationships
+4. Check for any watchlist connections
+5. Assess risk level based on findings
+```
+
+**Specialist Agent Executes**:
+```
+1. get_record("CUSTOMERS", "1070")
+   → Found: Jie Wang, Hong Kong, DOB 9/14/93
+
+2. search_entities({"NAME_FULL": "Jie Wang", "DATE_OF_BIRTH": "9/14/93"})
+   → Found entity 55
+
+3. get_entity(55)
+   → Entity includes: CUSTOMERS 1069, 1070, REFERENCE 2013
+
+4. find_network([55], max_degrees=2)
+   → Connected to entity 91 (business relationship)
+
+5. search_entities in WATCHLIST
+   → No matches found
+
+Final Answer: Customer 1070 is Jie Wang from Hong Kong. This record is part of 
+entity 55, which consolidates 3 records. Entity 55 has a business relationship 
+(60% ownership) with entity 91. No watchlist matches found. Risk: LOW.
+```
+
+### Tips for Better Results
+
+**DO:**
+- ✅ Provide business context in responses (what does the data mean?)
+- ✅ Explain match confidence and data quality
+- ✅ Suggest relevant follow-up queries
+- ✅ Interpret findings for non-technical users
+- ✅ Highlight ambiguous matches or conflicts
+
+**DON'T:**
+- ❌ Return raw JSON without interpretation
+- ❌ Make assumptions without verifying data
+- ❌ Ignore relationship implications
+- ❌ Skip data quality observations
+
 ## Available Tools
 
 Once configured, your Agent Studio workflows can use these Senzing tools:
