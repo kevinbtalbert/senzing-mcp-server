@@ -455,6 +455,110 @@ The MCP server architecture enables seamless integration between Claude Desktop 
 
 4. **Access from Claude Desktop** - The MCP server will connect to your Cloudera ML workspace's Senzing instance via the embedded SDK
 
+## Using with Agent Studio (Cloudera AI)
+
+If you're integrating with Agent Studio in Cloudera AI:
+
+### Configuration
+
+Agent Studio uses `mcpadapt` to connect to MCP servers. The configuration must include proper environment variables:
+
+```json
+{
+  "mcpServers": {
+    "senzing": {
+      "command": "bash",
+      "args": [
+        "/path/to/mcp_server_wrapper.sh"
+      ],
+      "env": {
+        "SENZING_PROJECT_DIR": "/home/cdsw/senzing",
+        "PYTHONPATH": "/opt/senzing/er/sdk/python"
+      }
+    }
+  }
+}
+```
+
+Or if using `uvx`:
+
+```json
+{
+  "mcpServers": {
+    "senzing": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/kevinbtalbert/senzing-mcp-server@main",
+        "run-server"
+      ],
+      "env": {
+        "SENZING_PROJECT_DIR": "/home/cdsw/senzing",
+        "PYTHONPATH": "/opt/senzing/er/sdk/python",
+        "LD_LIBRARY_PATH": "/home/cdsw/senzing/lib:/opt/senzing/er/lib"
+      }
+    }
+  }
+}
+```
+
+### Troubleshooting Timeout Errors
+
+If you see `TimeoutError: Couldn't connect to the MCP server after 60 seconds`:
+
+1. **Verify Senzing project exists**:
+   ```bash
+   ls -la ~/senzing/var/sqlite/G2C.db
+   # Should show your database file
+   ```
+
+2. **Run the diagnostic script**:
+   ```bash
+   cd ~/senzing && source setupEnv
+   bash /path/to/debug_mcp_startup.sh
+   ```
+
+3. **Test manual startup**:
+   ```bash
+   cd ~/senzing && source setupEnv
+   export SENZING_PROJECT_DIR=~/senzing
+   python3 -m senzing_mcp_server.server
+   # Should start without errors
+   # Press Ctrl+C to stop
+   ```
+
+4. **Check environment variables**:
+   ```bash
+   echo $SENZING_PROJECT_DIR  # Should be /home/cdsw/senzing
+   echo $PYTHONPATH           # Should include /opt/senzing/er/sdk/python
+   python3 -c "from senzing_core import SzAbstractFactoryCore; print('✓ OK')"
+   ```
+
+5. **Common fixes**:
+   - Ensure `setupEnv` was sourced before starting Agent Studio workflow
+   - Verify `PYTHONPATH` includes `/opt/senzing/er/sdk/python`
+   - Check database permissions: `chmod 644 ~/senzing/var/sqlite/G2C.db`
+   - Increase timeout if server is just slow to start
+
+### Helper Scripts
+
+Two helper scripts are provided in the repository:
+
+- **`debug_mcp_startup.sh`**: Comprehensive diagnostics for MCP server startup issues
+- **`mcp_server_wrapper.sh`**: Wrapper that ensures environment is configured before starting the server
+
+Download and use these for troubleshooting:
+```bash
+wget https://raw.githubusercontent.com/kevinbtalbert/senzing-mcp-server/main/debug_mcp_startup.sh
+wget https://raw.githubusercontent.com/kevinbtalbert/senzing-mcp-server/main/mcp_server_wrapper.sh
+chmod +x debug_mcp_startup.sh mcp_server_wrapper.sh
+
+# Run diagnostics
+bash debug_mcp_startup.sh
+
+# Use wrapper in Agent Studio config
+```
+
 ## Testing Your Setup
 
 Verify the MCP server can connect to your Senzing instance:

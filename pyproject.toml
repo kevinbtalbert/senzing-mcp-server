@@ -13,6 +13,7 @@ dependencies = [
 
 [project.scripts]
 run-server = "senzing_mcp_server.server:main"
+senzing-mcp = "senzing_mcp_server.server:main"
 
 [project.urls]
 Homepage = "https://github.com/kevinbtalbert/senzing-mcp-server"
