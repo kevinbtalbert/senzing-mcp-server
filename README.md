@@ -14,6 +14,93 @@ This MCP server exposes Senzing's powerful entity resolution engine through the 
 
 Works seamlessly with the [CAI-Senzing-Custom-Runtime](https://github.com/kevinbtalbert/CAI-Senzing-Custom-Runtime) Docker environment for Cloudera ML workspaces.
 
+## Architecture
+
+### Embedded SDK Design
+
+The MCP server uses an **embedded architecture** - there is **no separate Senzing server process**. Instead, the Senzing SDK runs directly inside the MCP server's Python process as a native library.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Claude Desktop                            │
+│                  (MCP Client - Local)                        │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+                            │ MCP Protocol (stdio/JSON-RPC)
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│         senzing-mcp-server (Python Process)                  │
+│                                                               │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  MCP Server Layer                                   │   │
+│  │  - Tool handlers (add_record, search_entities, etc)│   │
+│  │  - Request/response marshaling                      │   │
+│  └─────────────────────┬───────────────────────────────┘   │
+│                        │                                     │
+│  ┌─────────────────────▼───────────────────────────────┐   │
+│  │  Senzing SDK v4 (Embedded Library)                  │   │
+│  │  - SzAbstractFactoryCore (Python bindings)          │   │
+│  │  - SzEngine (entity resolution)                     │   │
+│  │  - Native C++ libraries (.so files)                 │   │
+│  └─────────────────────┬───────────────────────────────┘   │
+│                        │ Direct file I/O / SQL               │
+└────────────────────────┼─────────────────────────────────────┘
+                         │
+                         ▼
+          ┌──────────────────────────────────┐
+          │  Database (Persistent Storage)   │
+          │                                   │
+          │  SQLite:                          │
+          │    ~/senzing/var/sqlite/G2C.db   │
+          │                                   │
+          │  Or PostgreSQL/MySQL for prod    │
+          └──────────────────────────────────┘
+```
+
+### How It Works
+
+1. **MCP Client (Claude Desktop)** sends natural language requests via stdio
+2. **MCP Server** translates requests into Senzing SDK function calls
+3. **Senzing SDK** (embedded library) processes entity resolution in-process
+4. **Database** is accessed directly via file I/O (SQLite) or SQL connection (PostgreSQL/MySQL)
+5. **Results** flow back through MCP protocol to Claude
+
+### Key Characteristics
+
+- **No Network Overhead**: All Senzing operations are in-process function calls
+- **No Daemon Required**: Senzing doesn't run as a background service
+- **Direct Database Access**: SQLite file or SQL database accessed directly
+- **Single Process**: MCP server and Senzing SDK run in the same Python process
+- **Fast Response Times**: No HTTP/RPC overhead, minimal latency
+
+### Deployment Models
+
+#### Local Development (Current Setup)
+```
+Claude Desktop (Mac) → MCP Server (Cloudera ML) → Senzing SDK → SQLite
+```
+- MCP server runs in Cloudera ML workspace
+- Accesses persistent SQLite database at `~/senzing/var/sqlite/G2C.db`
+- Single user, development/evaluation use case
+
+#### Production (Future Enhancement)
+```
+Multiple Clients → Load Balancer → Multiple MCP Servers → PostgreSQL/MySQL
+```
+- Replace SQLite with PostgreSQL or MySQL
+- Run multiple MCP server instances for horizontal scaling
+- Shared database enables concurrent access
+- Better performance for high-volume workloads
+
+### Security Considerations
+
+Since the MCP server has **direct database access**:
+- ✅ No exposed network ports (uses stdio for MCP)
+- ✅ Authentication handled by MCP client
+- ✅ Database access controlled by file permissions (SQLite) or SQL credentials
+- ⚠️ Grant least-privilege access to the Senzing project directory
+- ⚠️ For production, use database-level access controls and encryption
+
 ## Prerequisites
 
 - **Senzing SDK v4**: Must be installed and configured
@@ -25,19 +112,21 @@ Works seamlessly with the [CAI-Senzing-Custom-Runtime](https://github.com/kevinb
 
 ## Quick Start with CAI-Senzing-Custom-Runtime
 
-The fastest way to get started is to use the pre-built Docker runtime:
+The fastest way to get started is to use the pre-built Docker runtime. The MCP server will connect directly to your Senzing SDK installation (see [Architecture](#architecture) for details).
 
 1. **Follow the [CAI-Senzing-Custom-Runtime setup guide](https://github.com/kevinbtalbert/CAI-Senzing-Custom-Runtime#getting-started-with-sample-data)** to:
    - Create your persistent Senzing project at `~/senzing`
    - Load sample data (truth set)
    - Verify everything works with `sz_explorer`
 
-2. **Configure Claude Desktop** (see Configuration section below)
+2. **Configure Claude Desktop** (see Configuration section below) to connect to your Senzing project
 
 3. **Start using Senzing in Claude!** Try queries like:
    - "Search for entities named Robert Smith"
    - "Get entity 1"
    - "Find the path between entity 1 and entity 100"
+
+> **Note**: The MCP server uses an embedded architecture - it loads the Senzing SDK directly as a library and accesses your database. No separate server process is required.
 
 ## Installation
 
@@ -317,6 +406,8 @@ python3 -c "from senzing_core import SzAbstractFactoryCore; from senzing import 
 
 If you're running this in a Cloudera ML workspace with the CAI-Senzing-Custom-Runtime:
 
+### Setup in Cloudera ML
+
 1. **Create your persistent project** (if not already done):
    ```bash
    /opt/senzing/er/bin/sz_create_project ~/senzing
@@ -325,9 +416,44 @@ If you're running this in a Cloudera ML workspace with the CAI-Senzing-Custom-Ru
 
 2. **Load sample data** (see [runtime README](https://github.com/kevinbtalbert/CAI-Senzing-Custom-Runtime#getting-started-with-sample-data))
 
+### How It Works
+
+The MCP server architecture enables seamless integration between Claude Desktop (running on your Mac) and Senzing (running in your Cloudera ML workspace):
+
+```
+┌──────────────────┐           ┌─────────────────────────────────┐
+│ Claude Desktop   │  stdio    │  Cloudera ML Workspace          │
+│ (Your Mac)       │◄─────────►│                                  │
+│                  │  via uvx  │  ┌────────────────────────────┐ │
+│ - Natural        │           │  │ senzing-mcp-server         │ │
+│   language       │           │  │ (Python process)           │ │
+│   queries        │           │  │                            │ │
+│                  │           │  │ ┌────────────────────────┐ │ │
+│                  │           │  │ │ Senzing SDK v4         │ │ │
+│                  │           │  │ │ (Embedded library)     │ │ │
+│                  │           │  │ └──────────┬─────────────┘ │ │
+│                  │           │  └────────────┼───────────────┘ │
+│                  │           │               │                 │
+│                  │           │               ▼                 │
+│                  │           │  ┌──────────────────────────┐  │
+│                  │           │  │ ~/senzing/var/sqlite/    │  │
+│                  │           │  │ G2C.db (Persistent)      │  │
+│                  │           │  └──────────────────────────┘  │
+└──────────────────┘           └─────────────────────────────────┘
+```
+
+**Key Points**:
+- MCP server runs **inside your Cloudera ML workspace** (not on your Mac)
+- Claude Desktop launches it via `uvx` and communicates over stdio
+- Senzing SDK is **embedded** in the MCP server process
+- Database is accessed **directly** within the workspace
+- No network ports exposed, no separate servers needed
+
+### Claude Desktop Configuration
+
 3. **Configure Claude Desktop** with `SENZING_PROJECT_DIR="/home/cdsw/senzing"`
 
-4. **Access from Claude Desktop** - The MCP server will connect to your Cloudera ML workspace's Senzing instance
+4. **Access from Claude Desktop** - The MCP server will connect to your Cloudera ML workspace's Senzing instance via the embedded SDK
 
 ## Testing Your Setup
 
